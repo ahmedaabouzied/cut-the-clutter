@@ -1,0 +1,58 @@
+There are two independent bugs, and either one can make it fail.
+
+### 1. Data race on `count`
+
+`OnDone` is called from three different goroutines, and each one does `count++` with no synchronization. `count++` is a read-modify-write, not an atomic operation, so two goroutines can interleave like this:
+
+```
+G1: read count (0)
+G2: read count (0)
+G1: write count = 1
+G2: write count = 1   // G1's increment is lost
+```
+
+That gives you `got 2, want 3` (or even 1). Under the Go memory model this is undefined behavior, not just a lost update. `go test -race` will flag it right away.
+
+### 2. `time.Sleep` is not synchronization
+
+The sleep assumes all three jobs finish within 100ms. On a loaded CI machine, with `-race` enabled (which slows execution a lot), or under `-parallel`, they sometimes won't, and you get `got 0` or `got 1`. Even when they do finish in time, sleeping creates no happens-before edge. The main goroutine's read of `count` is still racy and isn't guaranteed to see the writes.
+
+### Fix
+
+Wait for exactly the events you expect, and make the counter safe for concurrent use:
+
+```go
+func TestWorker(t *testing.T) {
+	var count atomic.Int32
+	var wg sync.WaitGroup
+	wg.Add(3)
+
+	w := NewWorker()
+	w.OnDone(func() {
+		count.Add(1)
+		wg.Done()
+	})
+	w.Start(3)
+
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("timed out; got %d callbacks, want 3", count.Load())
+	}
+
+	if got := count.Load(); got != 3 {
+		t.Fatalf("got %d, want 3", got)
+	}
+}
+```
+
+- `wg.Wait()` blocks until all three callbacks have run and establishes happens-before, so the final read is correct.
+- `atomic.Int32` (Go 1.19+) removes the lost-update race. A `sync.Mutex` would also work.
+- The timeout is only a safety net against hangs. It's generous because it should never fire in a passing run, unlike the 100ms sleep, which was doing the actual synchronizing.
+
+If `Worker` has its own `Wait()` or `Stop()` that blocks until the jobs finish, use that instead of the WaitGroup. Keep the atomic counter either way.
+
+Also, if real users of `OnDone` will call it concurrently, document that. Callers will hit the same race in production code.

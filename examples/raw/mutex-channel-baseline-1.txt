@@ -1,0 +1,67 @@
+The short rule: **use a mutex to protect state; use a channel to transfer ownership or coordinate work.**
+
+## Use a mutex when…
+
+- **Several goroutines share one piece of state** (a cache, counter, map, or struct fields) and just need safe reads and writes.
+- **The critical section is small and local**: lock, touch the data, unlock.
+- **You care about performance on a hot path.** An uncontended `sync.Mutex` is much cheaper than a channel send/receive.
+- **Reads greatly outnumber writes.** Consider `sync.RWMutex`, or `sync/atomic` for single values.
+
+```go
+type Counter struct {
+    mu sync.Mutex
+    n  map[string]int
+}
+
+func (c *Counter) Inc(key string) {
+    c.mu.Lock()
+    defer c.mu.Unlock()
+    c.n[key]++
+}
+```
+
+Wrapping this in a goroutine plus request/response channels would add complexity and slow it down, with no benefit.
+
+## Use a channel when…
+
+- **You're passing data between goroutines** and handing off ownership: "here's a job, it's yours now."
+- **You're building pipelines or worker pools** (producer → workers → consumer).
+- **You need signaling or coordination**: done/cancel notifications, fan-out/fan-in, or waiting for results.
+- **You want backpressure or rate limiting.** A buffered channel works as a bounded queue or semaphore.
+- **You need to wait on several events at once** with `select`, including timeouts and `ctx.Done()`.
+
+```go
+jobs := make(chan Job)
+results := make(chan Result)
+
+for i := 0; i < 4; i++ {
+    go func() {
+        for j := range jobs {
+            results <- process(j)
+        }
+    }()
+}
+```
+
+## Quick decision guide
+
+| Situation | Reach for |
+|---|---|
+| Guarding a map/struct/counter | `sync.Mutex` / `RWMutex` |
+| Single integer or flag | `sync/atomic` |
+| Handing work/data to another goroutine | channel |
+| Waiting for N goroutines to finish | `sync.WaitGroup` (or `errgroup`) |
+| Cancellation / deadlines | `context.Context` |
+| One-time initialization | `sync.Once` |
+| Limiting concurrency | buffered channel as semaphore, or `semaphore.Weighted` |
+| Selecting among multiple events/timeouts | channels + `select` |
+
+## Common pitfalls
+
+- **Channels used as a mutex.** A goroutine that owns a map and serves `get`/`set` requests over channels is usually just a slower, more bug-prone mutex.
+- **Mutexes used for coordination.** Polling a shared flag under a lock in a loop means you actually wanted a channel or a `sync.Cond`.
+- **Holding a lock while blocking.** Doing I/O or sending on a channel while holding a mutex invites deadlocks.
+- **Copying a struct that contains a mutex.** Use pointer receivers. `go vet` catches this.
+- **Unclear channel ownership.** Only the sender should close a channel, and a nil or unclosed channel can leak goroutines.
+
+The Go proverb "Don't communicate by sharing memory; share memory by communicating" is good design guidance. The Go wiki also says to use whichever is most expressive and simplest for the problem. In practice, most real programs use both: channels for the flow of work, and mutexes for the shared state that the work touches.

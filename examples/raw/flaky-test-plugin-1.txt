@@ -1,0 +1,39 @@
+The test has two bugs: a data race and a timing guess.
+
+**1. `count++` races.** Each job runs in its own goroutine, so three goroutines can call the callback at once. `count++` is a read, an add, and a write, and two goroutines can read the same value and both write back `1`, which loses an increment. Run `go test -race` and the detector will flag it.
+
+**2. `time.Sleep` guesses when the jobs finish.** 100ms usually suffices, but on a loaded CI machine or under `-race` (which slows execution) the jobs may not finish in time. The test then sees `count == 1` or `2` and fails. Even when the jobs finish, the sleep creates no happens-before edge, so the test goroutine has no guarantee of seeing the updated `count`.
+
+**Fix:** wait on the actual events instead of the clock, and synchronize the counter.
+
+```go
+func TestWorker(t *testing.T) {
+	var count atomic.Int32
+	var wg sync.WaitGroup
+	wg.Add(3)
+
+	w := NewWorker()
+	w.OnDone(func() {
+		count.Add(1)
+		wg.Done()
+	})
+	w.Start(3)
+
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("timed out; got %d callbacks, want 3", count.Load())
+	}
+
+	if got := count.Load(); got != 3 {
+		t.Fatalf("got %d, want 3", got)
+	}
+}
+```
+
+The `WaitGroup` makes the test wait exactly as long as the jobs take, and the generous timeout only fires if something hangs. If `Worker` exposes a `Wait()` or `Stop()` method, call that instead of building the WaitGroup yourself.
+
+One more thing to check: if `Worker` calls the `OnDone` callback from several goroutines, it should document that. Otherwise every caller will hit this same race.

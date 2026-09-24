@@ -1,0 +1,23 @@
+Your new pods can't reach Postgres. The app panics on startup when it tries to connect to `10.0.3.14:5432` and gets `connection refused`, so Kubernetes restarts it until the rollout passes its progress deadline.
+
+"Connection refused" means the host answered but nothing was accepting connections on port 5432. It's not a timeout, and it's not an auth error. The usual causes:
+
+1. **Postgres is down or restarting.** Check the database pod or host:
+   ```
+   kubectl get pods -A -o wide | grep 10.0.3.14
+   ```
+2. **The IP is stale.** A hardcoded pod IP breaks whenever that pod reschedules. Point the app at a Service DNS name (e.g. `postgres.db.svc.cluster.local`) instead. Look at what the new version uses:
+   ```
+   kubectl get deploy api -o yaml | grep -iA2 -E 'DB_|DATABASE|PG'
+   ```
+3. **Config changed in this release.** If the old pods still run fine, compare their env and config with the new ones. A wrong host or port in the new ConfigMap or Secret would explain why only the new version fails.
+4. **A NetworkPolicy blocks it.** This usually shows up as a timeout, but a reject rule can return "refused."
+
+Start with #3. The old replicas are probably still serving traffic, which suggests the database is up and something in the new release points at the wrong place:
+
+```
+kubectl rollout history deploy/api
+kubectl rollout undo deploy/api   # if you need to restore service now
+```
+
+Separately, the app shouldn't panic on a failed DB connection at startup. Retrying with backoff and failing the readiness probe until connected would let it survive brief database restarts.

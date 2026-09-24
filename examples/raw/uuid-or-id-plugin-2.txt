@@ -1,0 +1,29 @@
+Use `bigint GENERATED ALWAYS AS IDENTITY` by default. Switch to UUIDs only when you have a concrete reason.
+
+**Why bigint wins by default**
+- It takes 8 bytes versus 16. Indexes stay smaller and joins run faster, and the gap grows with every foreign key that references the table.
+- Values insert in order, so B-tree indexes stay compact. Random UUIDv4 values scatter writes across the index, which causes page splits and bloat.
+- Humans can read, type, and debug them.
+
+**When UUIDs earn their cost**
+- **Clients or multiple services generate IDs** before the row reaches the database, as in offline apps, event sourcing, or distributed writers.
+- **You merge or shard data** across databases and need IDs that never collide.
+- **You expose IDs publicly** and don't want to leak row counts or let people guess neighboring records. You can also solve this with a separate public ID column, such as a UUID or a short random slug, while keeping bigint internally.
+
+**If you pick UUIDs, use UUIDv7.** It embeds a timestamp, so values arrive roughly in order and avoid most of v4's index problems. Postgres 18 ships a native `uuidv7()` function. On older versions, generate v7 in your application or use an extension like `pg_uuidv7`.
+
+```sql
+-- Default
+CREATE TABLE orders (
+  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  ...
+);
+
+-- When you need UUIDs (Postgres 18+)
+CREATE TABLE orders (
+  id uuid PRIMARY KEY DEFAULT uuidv7(),
+  ...
+);
+```
+
+Avoid `serial`. Identity columns replace it and handle permissions and sequence ownership more cleanly. Also avoid plain `integer`, because 2.1 billion rows arrives sooner than people expect, and migrating a primary key's type on a large table is painful.

@@ -1,0 +1,24 @@
+Your new pod can't reach Postgres. The app dials `10.0.3.14:5432` at startup, gets `connection refused`, and panics. Kubernetes restarts it, it panics again, and after 5 restarts it sits in `CrashLoopBackOff`. The rollout never gets 3 healthy replicas, so it hits the progress deadline.
+
+"Connection refused" means the host answered but nothing accepted on port 5432. The network path works; the database isn't listening there. Likely causes:
+
+1. **Stale IP.** `10.0.3.14` looks like a hard-coded pod IP. If Postgres restarted, it got a new IP. Point the app at the Service DNS name, such as `postgres.default.svc.cluster.local`, not an IP.
+2. **Postgres is down.** Check its pod.
+3. **Wrong config in this release.** The new version may read a different env var or secret than the old one.
+
+Run these to narrow it down:
+
+```sh
+kubectl get pods -o wide | grep 10.0.3.14      # does anything own that IP now?
+kubectl get svc,endpoints | grep -i postgres    # does the Service have endpoints?
+kubectl get deploy api -o yaml | grep -iA3 -E 'DB|DATABASE|POSTGRES'
+kubectl rollout history deploy/api              # what changed?
+```
+
+If the old replicas still serve traffic, nothing is down yet. To back out while you fix it:
+
+```sh
+kubectl rollout undo deploy/api
+```
+
+Also make the app retry the DB connection with backoff instead of panicking. A brief database blip shouldn't crash-loop your API.

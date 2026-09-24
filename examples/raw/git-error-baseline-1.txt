@@ -1,0 +1,33 @@
+The remote `main` has commits that your local `main` doesn't. Git won't let a push overwrite those commits, because that would discard someone else's work (or your own work pushed from another machine or merged via a PR on GitHub).
+
+"Non-fast-forward" means Git can't just move the remote branch pointer forward to your commit. The histories have diverged:
+
+```
+remote:  A---B---C---X      (X is on GitHub, not on your machine)
+local:   A---B---C---Y      (Y is your new commit)
+```
+
+**Fix: integrate the remote changes, then push.**
+
+```sh
+git pull --rebase    # replays your commits on top of the remote ones
+# resolve any conflicts, then: git add <files> && git rebase --continue
+git push
+```
+
+Or, if you prefer a merge commit:
+
+```sh
+git pull             # fetch + merge
+git push
+```
+
+To see what's on the remote before deciding:
+
+```sh
+git fetch
+git log --oneline main..origin/main   # commits on remote you don't have
+git log --oneline origin/main..main   # your commits not yet pushed
+```
+
+**Avoid `git push --force`** unless you're certain the remote commits should be thrown away, such as on a personal branch you just rebased. On a shared `main` it deletes other people's work. If you really need to force, `git push --force-with-lease` is safer because it refuses to push if the remote changed since you last fetched.

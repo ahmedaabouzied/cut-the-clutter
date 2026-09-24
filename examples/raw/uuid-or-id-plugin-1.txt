@@ -1,0 +1,21 @@
+Use a `bigint` identity column by default. Switch to UUIDs only when you need what they give you.
+
+```sql
+id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY
+```
+
+**Why bigint wins by default:**
+- 8 bytes vs 16. Smaller indexes, smaller foreign keys, more rows in cache.
+- Sequential inserts append to the right edge of the B-tree, so pages stay dense and writes stay fast.
+- Easy to read and type while debugging.
+
+Use `bigint`, not `int`. Running out of 2.1 billion IDs on a busy table is a painful migration.
+
+**Pick UUIDs when:**
+- Clients or multiple services generate IDs before they reach the database (offline sync, distributed writes, merging data from several databases).
+- You expose IDs publicly and don't want them guessable or leaking your row count (`/orders/1042` tells competitors your volume).
+- You plan to shard.
+
+**If you pick UUIDs, use UUIDv7, not v4.** v7 is time-ordered, so it keeps most of the insert locality that integers have. Random v4 scatters inserts across the index, which bloats it and slows writes on large tables. Postgres 18 ships `uuidv7()` natively; on older versions, generate them in the app or use an extension.
+
+**A common middle path:** a `bigint` primary key for joins and internal use, plus a separate `uuid` column with a unique index for anything exposed in URLs or APIs. It costs one extra column and gives you both benefits.

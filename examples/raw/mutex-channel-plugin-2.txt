@@ -1,0 +1,64 @@
+Use a mutex to protect shared state. Use a channel to pass data or signals between goroutines.
+
+The Go proverb sums it up: *"Don't communicate by sharing memory; share memory by communicating."* That doesn't mean channels always win. The Go wiki itself says to use whichever is simpler for the problem.
+
+## Reach for a mutex when
+
+- **Several goroutines read or write one piece of state**: a cache, a counter, a map, a struct's fields.
+- **The critical section is short**: lock, update, unlock.
+- **Ownership doesn't move**: the data lives in one place and everyone touches it there.
+
+```go
+type Counter struct {
+    mu sync.Mutex
+    n  map[string]int
+}
+
+func (c *Counter) Inc(key string) {
+    c.mu.Lock()
+    defer c.mu.Unlock()
+    c.n[key]++
+}
+```
+
+Wrapping this in a goroutine that owns the map and serves requests over channels adds code, latency, and a goroutine to manage, and gains nothing.
+
+Variants to know:
+- `sync.RWMutex` when reads far outnumber writes.
+- `sync/atomic` for single counters or flags.
+- `sync.Once` for one-time initialization.
+
+## Reach for a channel when
+
+- **You hand off ownership of data**: a producer creates work, a consumer takes it, and only one goroutine holds it at a time.
+- **You build pipelines or worker pools**: stages connected by channels.
+- **You need to signal events**: "done", "cancel", "result ready". Closing a channel broadcasts to every receiver.
+- **You want to wait on several things at once**: `select` over channels, timers, and `ctx.Done()`.
+- **You need backpressure**: a buffered channel caps how much work queues up.
+
+```go
+jobs := make(chan Job)
+results := make(chan Result)
+
+for i := 0; i < 4; i++ {
+    go func() {
+        for j := range jobs {
+            results <- process(j)
+        }
+    }()
+}
+```
+
+## Rule of thumb
+
+Ask what the goroutines are doing with the data:
+
+| Situation | Use |
+|---|---|
+| Guarding a struct's internal state | Mutex |
+| Passing work or results between goroutines | Channel |
+| Coordinating timeouts or cancellation | Channel / `context` |
+| Waiting for N goroutines to finish | `sync.WaitGroup` |
+| Incrementing a shared counter | `atomic` |
+
+If a channel-based design needs a goroutine whose only job is to guard a variable, a mutex will be simpler. If a mutex design has goroutines polling a shared flag or queue, a channel will be cleaner.

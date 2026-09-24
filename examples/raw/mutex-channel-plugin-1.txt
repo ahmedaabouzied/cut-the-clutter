@@ -1,0 +1,60 @@
+Use a mutex to protect shared state. Use a channel to pass ownership of data or to coordinate goroutines.
+
+## Reach for a mutex when
+
+- **Several goroutines read or write the same data**: a cache, a counter, a map, a struct's fields.
+- **The critical section is short**: lock, update, unlock.
+- **No work moves between goroutines.** You only need to stop them from colliding.
+
+```go
+type Counter struct {
+	mu sync.Mutex
+	n  map[string]int
+}
+
+func (c *Counter) Inc(key string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.n[key]++
+}
+```
+
+Wrapping this in a channel adds a goroutine, allocation, and scheduling cost for no gain. Use `sync.RWMutex` when reads far outnumber writes, and `sync/atomic` for a single counter or flag.
+
+## Reach for a channel when
+
+- **You hand data from one goroutine to another**: producer/consumer pipelines, worker pools, fan-out/fan-in.
+- **You signal events**: "done", "cancel", "result ready". Closing a channel broadcasts to every receiver.
+- **You need to wait on several things at once.** `select` handles timeouts, cancellation, and multiple sources. A mutex can't do that.
+- **You want to bound concurrency**: a buffered channel works as a semaphore.
+
+```go
+jobs := make(chan Job)
+results := make(chan Result)
+
+for i := 0; i < 4; i++ {
+	go func() {
+		for j := range jobs {
+			results <- process(j)
+		}
+	}()
+}
+```
+
+Here each job belongs to one worker at a time. No one shares it, so nothing needs a lock.
+
+## A quick test
+
+Ask: **"Am I guarding data, or moving it?"**
+
+- Guarding data in place → mutex.
+- Moving data or signaling between goroutines → channel.
+
+The Go proverb "share memory by communicating" pushes you toward channels, but the Go wiki says it plainly: use whichever is simpler and more expressive. A mutex that fits beats a channel design built to avoid one.
+
+## Traps
+
+- **Mutex**: forgetting to unlock (use `defer`), copying a struct that holds a mutex (`go vet` catches this), and holding a lock while you do I/O or send on a channel.
+- **Channel**: goroutines that leak because no one ever receives, deadlocks from unbuffered sends with no reader, and closing a channel twice or from the receiver side. Only the sender should close.
+
+Also consider higher-level tools before building your own: `sync.WaitGroup` to wait for goroutines, `errgroup` for groups that can fail, `sync.Once` for one-time setup, and `context.Context` for cancellation.

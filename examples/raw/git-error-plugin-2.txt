@@ -1,0 +1,20 @@
+The remote `main` has commits your local `main` doesn't. Someone else pushed, or you pushed from another machine or edited on GitHub. Git refuses because your push would discard those commits.
+
+Pull the remote changes first, then push:
+
+```sh
+git pull --rebase origin main   # replay your commits on top of theirs
+# resolve any conflicts, then: git rebase --continue
+git push
+```
+
+Plain `git pull` (a merge) works too; `--rebase` just keeps history linear.
+
+To see what's on the remote before integrating it:
+
+```sh
+git fetch
+git log main..origin/main   # commits you're missing
+```
+
+Don't reach for `git push --force` unless you mean to erase the remote commits. If you must overwrite, use `--force-with-lease`, which refuses when the remote has changed since your last fetch.

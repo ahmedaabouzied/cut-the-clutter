@@ -1,0 +1,36 @@
+**Short answer:** Default to `bigint GENERATED ALWAYS AS IDENTITY`. Switch to **UUIDv7** if you need IDs generated outside the database or exposed publicly.
+
+## Use `bigint` identity when
+- The table is internal and IDs never appear in URLs or APIs
+- You care about index size and join performance. It's 8 bytes vs 16, and inserts go to the end of the B-tree.
+- A single Postgres instance is the source of truth
+
+```sql
+CREATE TABLE orders (
+  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  ...
+);
+```
+
+Use `bigint`, not `int`/`serial`. Migrating off a 2.1B `int` limit later is painful.
+
+## Use UUID when
+- **Clients or services generate IDs** before inserting, for offline-first apps, idempotent retries, or event sourcing
+- **IDs are exposed publicly.** Sequential integers leak record counts and invite enumeration (`/invoices/1001`, `/invoices/1002`…).
+- **You merge data across databases, shards, or tenants** and need global uniqueness
+
+If you use UUIDs, **use v7, not v4**. v7 is time-ordered, so inserts stay roughly sequential in the index. Random v4 values scatter writes across the B-tree, which causes page splits, bloat, and worse cache behavior at scale. Postgres 18 has `uuidv7()` built in. On older versions, generate them in the app or use an extension like `pg_uuidv7`.
+
+```sql
+CREATE TABLE orders (
+  id uuid PRIMARY KEY DEFAULT uuidv7(),
+  ...
+);
+```
+
+## Hybrid option
+Use a `bigint` PK for internal joins plus a separate `uuid` column with a unique index for public exposure. You get compact foreign keys and non-guessable external IDs, at the cost of an extra column and index.
+
+**Caveat:** UUIDv7 embeds a creation timestamp. If revealing when a record was created is sensitive, use v4 for the public-facing ID.
+
+If you tell me more about the table (public-facing? distributed writers? expected row count?), I can give a firmer pick.

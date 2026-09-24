@@ -1,0 +1,49 @@
+There are two separate bugs, and either one can make it fail.
+
+### 1. Data race on `count`
+
+`OnDone` is called from 3 goroutines, and `count++` is not atomic. It is a read, an add, and a write. Two goroutines can both read `1` and both write `2`, so one increment is lost and you get `got 2, want 3`.
+
+The test goroutine also reads `count` with no synchronization. Under the Go memory model, it isn't even guaranteed to see the writes. `go test -race` will flag this right away.
+
+### 2. `time.Sleep` isn't synchronization
+
+Sleeping 100ms just hopes the jobs finish in time. On a loaded CI machine, with `-race` (which slows execution a lot), or with `-parallel`, the goroutines may not have run yet, and you get `got 0` or `got 1`.
+
+### Fix
+
+Wait for the callbacks explicitly, and make the counter safe:
+
+```go
+func TestWorker(t *testing.T) {
+	var count atomic.Int32
+	var wg sync.WaitGroup
+	wg.Add(3)
+
+	w := NewWorker()
+	w.OnDone(func() {
+		count.Add(1)
+		wg.Done()
+	})
+	w.Start(3)
+
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for jobs")
+	}
+
+	if got := count.Load(); got != 3 {
+		t.Fatalf("got %d, want 3", got)
+	}
+}
+```
+
+- `atomic.Int32` (Go 1.19+) fixes the lost updates. A `sync.Mutex` would also work.
+- The `WaitGroup` gives a real happens-before edge, so the read sees all writes. It also returns as soon as the jobs finish instead of always waiting 100ms.
+- The timeout keeps a bug from hanging the test forever. It's generous because it only matters on failure.
+
+If `Worker` has a `Wait()` or `Stop()` method, or you can add one, use that instead. Then the test doesn't need its own `WaitGroup`, and callers get the same guarantee.

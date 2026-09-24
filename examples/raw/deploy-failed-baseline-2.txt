@@ -1,0 +1,35 @@
+The new pods crash on startup because they can't reach Postgres at `10.0.3.14:5432`. The app panics on the failed DB connection, Kubernetes restarts it (5 restarts so far, now in `CrashLoopBackOff`), and the rollout hits its progress deadline without the new replicas ever becoming available.
+
+"Connection refused" means the host was reachable, but nothing accepted connections on port 5432. It's not a timeout, so this usually isn't a NetworkPolicy or firewall drop.
+
+**Key question: are the old pods still healthy?** The rollout stalled partway, so old-ReplicaSet pods are probably still serving. If they connect to the DB fine, the new release changed something. If they're also failing, the database itself is the problem.
+
+```sh
+kubectl get pods -l app=api -o wide   # compare old vs new ReplicaSet pods
+kubectl rollout history deploy/api
+```
+
+**If only the new pods fail, look at config drift:**
+```sh
+kubectl diff -f <your manifest>        # or compare revisions:
+kubectl rollout history deploy/api --revision=<N>
+kubectl get deploy api -o yaml | grep -iA3 -E 'DB_|DATABASE|PG'
+```
+Common causes:
+- A hardcoded IP (`10.0.3.14`) instead of a Service DNS name like `postgres.db.svc.cluster.local`
+- A changed ConfigMap or Secret
+- The wrong port
+
+**If the DB itself is down or moved:**
+```sh
+kubectl get svc,endpoints -A | grep 10.0.3.14
+kubectl get pods -A -o wide | grep 10.0.3.14
+```
+`10.0.3.14` could be a pod IP. Those change whenever the pod restarts, which would explain a sudden "refused." Also check that Postgres is listening on that interface (`listen_addresses`) and not only on localhost.
+
+**To stop the bleeding now:**
+```sh
+kubectl rollout undo deploy/api
+```
+
+Longer term, consider having the app retry the DB connection with backoff instead of panicking, and add a readiness probe. That way a brief DB blip doesn't crash-loop the pods.

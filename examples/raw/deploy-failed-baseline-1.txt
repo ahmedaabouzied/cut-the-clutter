@@ -1,0 +1,31 @@
+**The new pods can't reach Postgres, so they crash on startup.** The app panics when it dials `10.0.3.14:5432` and gets `connection refused`. The pod goes into CrashLoopBackOff, never becomes Ready, and the rollout hits its progress deadline.
+
+"Connection refused" means something answered at that IP but nothing is listening on 5432, or a firewall actively rejected the connection. It's not a DNS or timeout problem.
+
+**Most likely causes, in order:**
+
+1. **A hardcoded pod or node IP that's gone stale.** `10.0.3.14` looks like a pod IP. If your DB runs in-cluster and its pod was rescheduled, that IP now belongs to something else or nothing. The app should connect to a Service DNS name (e.g. `postgres.default.svc.cluster.local`), not an IP.
+2. **This release changed the DB config.** A new env var, ConfigMap, or Secret may point to the wrong host or port.
+3. **Postgres is down or restarting.**
+4. **A NetworkPolicy or security group change** is rejecting traffic from the new pods.
+
+**To narrow it down:**
+
+```sh
+# Where is the app told to connect?
+kubectl get deploy api -o yaml | grep -iE 'host|db|postgres|5432' -A1
+
+# Does anything own that IP now?
+kubectl get pods,svc -A -o wide | grep 10.0.3.14
+
+# Is Postgres healthy, and what's its current address?
+kubectl get pods,svc -A | grep -i postgres
+
+# Test from inside the cluster
+kubectl run dbtest --rm -it --image=postgres:16 --restart=Never -- \
+  pg_isready -h 10.0.3.14 -p 5432
+```
+
+**One odd detail:** the rollout says 1 of 3 updated replicas is available, but you've only shown one pod. Run `kubectl get pods -l app=api -o wide` to see all of them. If one new pod is healthy and the others crash, the problem is probably specific to certain nodes, such as a NetworkPolicy or routing issue.
+
+**To restore service now:** run `kubectl rollout undo deploy/api`. If the old version's DB config works, the rollback should bring you back up while you fix this.

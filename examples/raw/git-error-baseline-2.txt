@@ -1,0 +1,37 @@
+It means **the remote `main` has commits that your local `main` doesn't have**, so Git refuses to push because doing so would overwrite (discard) those commits.
+
+"Non-fast-forward" means your branch can't simply be appended onto the remote's history. Someone (a teammate, or you from another machine, or a merged PR on GitHub) pushed to `main` after you last pulled, so the histories have diverged:
+
+```
+remote:  A---B---C---D      (D is the commit you don't have)
+local:   A---B---C---E      (E is your new commit)
+```
+
+## How to fix it
+
+Bring in the remote changes first, then push:
+
+```sh
+git pull --rebase    # replay your commits on top of the remote's
+git push
+```
+
+Or, if you prefer a merge commit:
+
+```sh
+git pull             # merges origin/main into your main
+git push
+```
+
+If there are conflicts during the pull, Git will stop and let you resolve them. Edit the files, `git add` them, then run `git rebase --continue` (or `git commit` for a merge), and push.
+
+To see what you're missing before pulling:
+
+```sh
+git fetch
+git log main..origin/main    # commits on remote you don't have
+```
+
+## What *not* to do (usually)
+
+`git push --force` will make the error go away, but it **deletes the remote commits** you don't have. Only do that if you're sure those commits should be thrown away (e.g., you rewrote your own history on a personal branch). On a shared `main`, avoid it. If you must force-push, prefer `git push --force-with-lease`, which refuses if the remote has changed since you last fetched.
