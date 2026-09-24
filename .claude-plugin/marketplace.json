@@ -1,0 +1,15 @@
+{
+  "name": "cut-the-clutter",
+  "description": "Home of the cut-the-clutter plain-writing plugin.",
+  "owner": {
+    "name": "Ahmed Abouzied"
+  },
+  "plugins": [
+    {
+      "name": "cut-the-clutter",
+      "source": "./",
+      "description": "Keeps a plain-writing skill in Claude's context on every turn, so its prose stays short and direct.",
+      "version": "0.1.0"
+    }
+  ]
+}
