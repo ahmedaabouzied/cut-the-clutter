@@ -1,7 +1,7 @@
 {
   "name": "cut-the-clutter",
   "version": "0.1.0",
-  "description": "Keeps a plain-writing skill in Claude's context on every turn, so its prose stays short and direct.",
+  "description": "Stops Claude answering your stack trace with an essay.",
   "author": {
     "name": "Ahmed Abouzied"
   }

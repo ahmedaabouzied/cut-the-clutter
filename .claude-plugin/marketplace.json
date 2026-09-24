@@ -8,7 +8,7 @@
     {
       "name": "cut-the-clutter",
       "source": "./",
-      "description": "Keeps a plain-writing skill in Claude's context on every turn, so its prose stays short and direct.",
+      "description": "Stops Claude answering your stack trace with an essay.",
       "version": "0.1.0"
     }
   ]
