@@ -2,7 +2,8 @@
   "name": "cut-the-clutter",
   "description": "Home of the cut-the-clutter plain-writing plugin.",
   "owner": {
-    "name": "Ahmed Abouzied"
+    "name": "Ahmed Abouzied",
+    "email": "email@aabouzied.com"
   },
   "plugins": [
     {
